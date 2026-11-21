@@ -10,13 +10,14 @@ import os
 
 st.set_page_config(page_title="AI Viral Clip Finder", page_icon="🎬", layout="centered")
 st.title("🎬 Free AI Viral Clip Finder")
-st.write("Paste a YouTube link to find the best moments for Shorts & Reels.")
+st.write("Paste a YouTube link to find the best moments for Shorts & Reels, then cut them in 9:16.")
 
 with st.sidebar:
     st.header("Settings")
     default_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
     api_key = st.text_input("Gemini API Key (Free from AI Studio)", value=default_key, type="password")
     crop_vertical = st.checkbox("Auto-crop to 9:16 Vertical (Shorts/Reels)", value=True)
+    cookie_file = st.file_uploader("🍪 Upload cookies.txt (Optional - for Cloud IP bypass)", type=["txt"])
     st.caption("Get a free key at aistudio.google.com")
 
 class ViralClip(BaseModel):
@@ -40,8 +41,8 @@ def format_time(seconds):
 
 video_url = st.text_input("🔗 Paste YouTube Video Link:", placeholder="https://www.youtube.com/watch?v=...")
 
-with st.expander("📝 Optional: Paste Transcript Manually (If YouTube blocks cloud IP)"):
-    manual_transcript = st.text_area("Paste YouTube transcript here (Open video on YouTube → Description → Show transcript → Copy & Paste)", height=150)
+with st.expander("📝 Optional: Paste Transcript Manually (Instant 3-Second Scan)"):
+    manual_transcript = st.text_area("Paste YouTube transcript here (Description → Show transcript → Copy & Paste)", height=150)
 
 if st.button("🔍 Find Viral Moments", type="primary"):
     if not api_key:
@@ -64,11 +65,9 @@ if st.button("🔍 Find Viral Moments", type="primary"):
             success = False
             last_error = None
 
-            # Method A: If user pasted manual transcript, use it
             if manual_transcript.strip():
                 contents_payload = f"{base_prompt}\n\nTranscript:\n{manual_transcript[:60000]}"
             else:
-                # Method B: Try fetching transcript via API; if IP blocked, pass YouTube URL directly to Gemini
                 video_id = extract_video_id(video_url)
                 transcript_text = ""
                 if video_id:
@@ -85,7 +84,6 @@ if st.button("🔍 Find Viral Moments", type="primary"):
                 if transcript_text:
                     contents_payload = f"{base_prompt}\n\nTranscript:\n{transcript_text[:60000]}"
                 else:
-                    # Pass YouTube link directly to Gemini multimodal video understanding
                     clean_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else video_url
                     contents_payload = [
                         types.Part.from_uri(file_uri=clean_url, mime_type="video/mp4"),
@@ -100,6 +98,7 @@ if st.button("🔍 Find Viral Moments", type="primary"):
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             response_schema=ClipList,
+                            media_resolution="MEDIA_RESOLUTION_LOW",
                         ),
                     )
                     data = json.loads(response.text)
@@ -112,7 +111,7 @@ if st.button("🔍 Find Viral Moments", type="primary"):
                     continue
 
             if not success:
-                st.error(f"Could not analyze video right now. Tip: Expand the 'Paste Transcript Manually' box above and paste the video's YouTube transcript for instant results! Details: {last_error}")
+                st.error(f"Could not analyze video right now. Details: {last_error}")
 
 if "clips" in st.session_state:
     st.subheader("🔥 Suggested Viral Clips")
@@ -139,8 +138,13 @@ if "clips" in st.session_state:
                             "--download-sections", f"*{start_str}-{end_str}",
                             "--force-keyframes-at-cuts",
                             "-o", "temp_raw.mp4",
-                            st.session_state["video_url"]
                         ]
+                        if cookie_file is not None:
+                            with open("cookies.txt", "wb") as cf:
+                                cf.write(cookie_file.getbuffer())
+                            cmd += ["--cookies", "cookies.txt"]
+                        cmd.append(st.session_state["video_url"])
+
                         subprocess.run(cmd, check=False)
                         
                         if os.path.exists("temp_raw.mp4"):
@@ -165,4 +169,4 @@ if "clips" in st.session_state:
                                     key=f"dl_{idx}"
                                 )
                         else:
-                            st.warning("YouTube blocked the direct server download on this shared IP. Use the exact timestamps above to cut it in CapCut or your video editor!")
+                            st.warning("Download blocked on cloud IP. Upload cookies.txt in the left sidebar or run locally on your PC!")
